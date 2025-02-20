@@ -6,6 +6,7 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.network.packet.s2c.play.PositionFlag;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -18,6 +19,7 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
@@ -202,7 +204,7 @@ public class Safeserver implements ModInitializer {
 	}
 
 	private void teleportPlayerToJoinPosition(ServerPlayerEntity player, Vec3d joinPos) {
-		player.teleport(player.getServerWorld(), joinPos.x, joinPos.y, joinPos.z, player.getYaw(), player.getPitch());
+		player.teleport(player.getServerWorld(), joinPos.x, joinPos.y, joinPos.z, new HashSet<PositionFlag>(), player.getYaw(), player.getPitch(), false);
 		player.changeGameMode(GameMode.SPECTATOR);
 	}
 }
