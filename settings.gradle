@@ -8,3 +8,10 @@ pluginManagement {
 		gradlePluginPortal()
 	}
 }
+
+rootProject.name = 'safeserver'
+
+// Include version-specific subprojects
+include 'versions:1.21.8'
+include 'versions:1.21.9'
+include 'versions:1.21.10'

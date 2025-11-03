@@ -1,0 +1,102 @@
+buildscript {
+	repositories {
+		maven {
+			name = 'Fabric'
+			url = 'https://maven.fabricmc.net/'
+		}
+		mavenCentral()
+		gradlePluginPortal()
+	}
+	dependencies {
+		classpath 'net.fabricmc:fabric-loom:1.12.7'
+	}
+}
+
+apply plugin: 'fabric-loom'
+apply plugin: 'maven-publish'
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+// Reference source code from root project
+sourceSets {
+	main {
+		java {
+			srcDirs = [rootProject.file('src/main/java')]
+		}
+		resources {
+			srcDirs = [rootProject.file('src/main/resources')]
+		}
+	}
+	client {
+		java {
+			srcDirs = [rootProject.file('src/client/java')]
+		}
+		resources {
+			srcDirs = [rootProject.file('src/client/resources')]
+		}
+	}
+}
+
+loom {
+	splitEnvironmentSourceSets()
+
+	mods {
+		"safeserver" {
+			sourceSet sourceSets.main
+			sourceSet sourceSets.client
+		}
+	}
+}
+
+fabricApi {
+	configureDataGeneration {
+		client = true
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+}
+
+processResources {
+	inputs.property "version", project.version
+	inputs.property "minecraft_version", project.minecraft_version
+
+	filesMatching("fabric.mod.json") {
+		expand "version": project.version,
+		       "minecraft_version": project.minecraft_version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 21
+}
+
+java {
+	withSourcesJar()
+	sourceCompatibility = JavaVersion.VERSION_21
+	targetCompatibility = JavaVersion.VERSION_21
+}
+
+jar {
+	from(rootProject.file("LICENSE")) {
+		rename { "${it}_${project.base.archivesName.get()}"}
+	}
+}
+
+publishing {
+	publications {
+		create("mavenJava", MavenPublication) {
+			artifactId = project.archives_base_name
+			from components.java
+		}
+	}
+}
