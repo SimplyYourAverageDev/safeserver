@@ -1,5 +1,6 @@
 buildscript {
 	repositories {
+		mavenLocal()
 		maven {
 			name = 'Fabric'
 			url = 'https://maven.fabricmc.net/'
@@ -56,6 +57,15 @@ loom {
 fabricApi {
 	configureDataGeneration {
 		client = true
+	}
+}
+
+repositories {
+	mavenLocal()
+	mavenCentral()
+	maven {
+		name = 'Fabric'
+		url = 'https://maven.fabricmc.net/'
 	}
 }
 

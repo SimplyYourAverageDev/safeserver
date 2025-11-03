@@ -4,23 +4,46 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Minecraft Fabric mod called "Safeserver" that adds mandatory password authentication to Minecraft servers. It's built using Java 21 and Fabric API, targeting Minecraft 1.21.8.
+This is a Minecraft Fabric mod called "Safeserver" that adds mandatory password authentication to Minecraft servers. It's built using Java 21 and Fabric API, supporting Minecraft versions 1.21.8, 1.21.9, and 1.21.10.
+
+## Multi-Version Build System
+
+The project uses a Gradle multi-project structure to build artifacts for multiple Minecraft versions simultaneously:
+- Version 1.21.8 - Fabric API 0.130.0+1.21.8
+- Version 1.21.9 - Fabric API 0.134.0+1.21.9
+- Version 1.21.10 - Fabric API 0.137.0+1.21.10
+
+See `MULTI_VERSION_BUILD.md` for detailed documentation on the build system.
 
 ## Development Commands
 
 ### Build and Development
-- `./gradlew build` - Build the mod JAR file
+- `./gradlew build` - Build mod JARs for ALL three Minecraft versions at once
+- `./gradlew :versions:1.21.8:build` - Build only for Minecraft 1.21.8
+- `./gradlew :versions:1.21.9:build` - Build only for Minecraft 1.21.9
+- `./gradlew :versions:1.21.10:build` - Build only for Minecraft 1.21.10
+- `./gradlew listArtifacts` - List all generated JAR files
 - `./gradlew publishToMavenLocal` - Publish to local Maven repository
 - `./gradlew runServer` - Run the mod in a server environment for testing
 - `./gradlew runClient` - Run the mod in a client environment for testing
 
 ### Project Structure
-- `src/main/java/` - Main mod source code
-- `src/client/java/` - Client-side specific code
+- `src/main/java/` - Main mod source code (shared across all versions)
+- `src/client/java/` - Client-side specific code (shared across all versions)
 - `src/main/resources/` - Resources including mod metadata and mixin configurations
-- `build.gradle` - Main build configuration
-- `gradle.properties` - Version information and dependencies
+- `build.gradle` - Root build configuration (parent project)
+- `gradle.properties` - Shared Gradle properties
+- `versions/` - Version-specific build configurations
+  - `versions/1.21.8/` - Minecraft 1.21.8 build configuration
+  - `versions/1.21.9/` - Minecraft 1.21.9 build configuration
+  - `versions/1.21.10/` - Minecraft 1.21.10 build configuration
 - `run/` - Server runtime directory with world data and configuration
+
+### Generated Artifacts
+After running `./gradlew build`, JAR files are generated at:
+- `versions/1.21.8/build/libs/safeserver-1.21.8-2.0.3.jar`
+- `versions/1.21.9/build/libs/safeserver-1.21.9-2.0.3.jar`
+- `versions/1.21.10/build/libs/safeserver-1.21.10-2.0.3.jar`
 
 ## Code Architecture
 
