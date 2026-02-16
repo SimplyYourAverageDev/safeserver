@@ -4,6 +4,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.command.argument.EntityArgumentType;
+import net.minecraft.server.PlayerConfigEntry;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
@@ -142,7 +143,9 @@ public class AuthCommands {
 
         // Command for OPs to reset another player's password
         dispatcher.register(CommandManager.literal("resetpassword")
-                .requires(source -> source.hasPermissionLevel(2)) // Require OP level 2 (configurable)
+                .requires(source -> source.getEntity() == null
+                        || (source.getEntity() instanceof ServerPlayerEntity player
+                        && source.getServer().getPlayerManager().isOperator(new PlayerConfigEntry(player.getGameProfile()))))
                 .then(CommandManager.argument("targetPlayer", EntityArgumentType.player())
                         .executes(context -> runResetPasswordCommand(
                                 context.getSource(),

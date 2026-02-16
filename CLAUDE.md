@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Minecraft Fabric mod called "Safeserver" that adds mandatory password authentication to Minecraft servers. It's built using Java 21 and Fabric API, targeting Minecraft 1.21.8.
+This is a Minecraft Fabric mod called "Safeserver" that adds mandatory password authentication to Minecraft servers. It's built using Java 21 and Fabric API, targeting Minecraft 1.21.11.
 
 ## Development Commands
 

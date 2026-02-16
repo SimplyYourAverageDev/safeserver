@@ -38,3 +38,47 @@ A simple Fabric mod for Minecraft that adds mandatory password authentication to
 4.  Restart your server.
 
 The mod will automatically generate the necessary configuration file upon first load. 
+
+## Publishing to Modrinth
+
+Use `scripts/publish_modrinth.sh` to build and publish a new version to Modrinth automatically.
+
+1. Create a Modrinth PAT with `VERSION_CREATE` scope.
+2. Export it in your shell:
+   `export MODRINTH_TOKEN=your_token_here`
+3. Run one of:
+   - Publish current `mod_version` from `gradle.properties`:
+     `scripts/publish_modrinth.sh --changelog-text "Bug fixes and improvements"`
+   - Bump version and publish:
+     `scripts/publish_modrinth.sh --version 2.0.4 --set-version --changelog-file CHANGELOG.md`
+
+Useful flags:
+- `--game-versions "1.21.11"` to override targeted MC versions
+- `--loaders "fabric"` to set loaders
+- `--sources-jar build/libs/safeserver-2.0.4-sources.jar` to override detected sources jar
+- `--version-type release|beta|alpha`
+- `--status listed|unlisted|draft|archived`
+- `--featured true|false`
+- `--skip-build` if you already built the jar
+
+Defaults:
+- Project: `safeserver`
+- API: `https://api.modrinth.com/v2`
+- Loader: `fabric`
+- Game version: read from `gradle.properties` (`minecraft_version`)
+- Uploads both main and sources jars in the same Modrinth version
+
+### GitHub Actions Auto Publish
+
+This repo now includes `.github/workflows/release-modrinth.yml`.
+
+Setup:
+1. Add repository secret `MODRINTH_TOKEN` (PAT with `VERSION_CREATE` scope).
+2. Keep `gradle.properties` `mod_version` in sync with your release tag.
+
+Release flow:
+1. Commit your release changes (including `mod_version` bump).
+2. Create and push a tag matching the version:
+   `git tag v2.0.4`
+   `git push origin v2.0.4`
+3. Workflow builds and publishes to Modrinth automatically.

@@ -3,6 +3,7 @@ package youraveragedev.safeserver;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.PlayerConfigEntry;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
@@ -11,6 +12,7 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.GameMode;
 import net.minecraft.world.Heightmap;
 import net.minecraft.world.World;
+import net.minecraft.world.WorldProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,16 +46,17 @@ public class PlayerStateManager {
         authenticatingPlayers.add(playerUuid);
         originalGameModes.put(playerUuid, player.interactionManager.getGameMode());
         
-        Vec3d originalPos = player.getPos();
+        Vec3d originalPos = new Vec3d(player.getX(), player.getY(), player.getZ());
         originalPositionsBeforeAuth.put(playerUuid, originalPos);
         
         Vec3d safePos = calculateSafeSpawnPosition(server, playerName);
         initialPositions.put(playerUuid, safePos);
         
-        boolean wasOp = server.getPlayerManager().isOperator(player.getGameProfile());
+        PlayerConfigEntry playerEntry = new PlayerConfigEntry(player.getGameProfile());
+        boolean wasOp = server.getPlayerManager().isOperator(playerEntry);
         originalOpStatus.put(playerUuid, wasOp);
         if (wasOp) {
-            server.getPlayerManager().removeFromOperators(player.getGameProfile());
+            server.getPlayerManager().removeFromOperators(playerEntry);
             LOGGER.info("Temporarily de-opped player {} ({}) for authentication.", playerName, playerUuid);
         }
         
@@ -105,7 +108,10 @@ public class PlayerStateManager {
             }
             
             if (wasOp != null && wasOp && serverInstance != null) {
-                serverInstance.getPlayerManager().addToOperators(player.getGameProfile());
+                PlayerConfigEntry playerEntry = new PlayerConfigEntry(player.getGameProfile());
+                if (!serverInstance.getPlayerManager().isOperator(playerEntry)) {
+                    serverInstance.getPlayerManager().addToOperators(playerEntry);
+                }
                 LOGGER.info("Restored OP status for player {}.", playerName);
             } else if (wasOp == null) {
                 LOGGER.warn("Original OP status for player {} (UUID {}) was unexpectedly missing during state restoration.", playerName, playerUuid);
@@ -164,8 +170,9 @@ public class PlayerStateManager {
                 restoredSomething = true;
             }
             
-            if (wasOp != null && wasOp && !server.getPlayerManager().isOperator(player.getGameProfile())) {
-                server.getPlayerManager().addToOperators(player.getGameProfile());
+            PlayerConfigEntry playerEntry = new PlayerConfigEntry(player.getGameProfile());
+            if (wasOp != null && wasOp && !server.getPlayerManager().isOperator(playerEntry)) {
+                server.getPlayerManager().addToOperators(playerEntry);
                 LOGGER.info("Restored OP status for {} before disconnect save.", playerName);
                 restoredSomething = true;
             }
@@ -206,16 +213,17 @@ public class PlayerStateManager {
         authenticatingPlayers.add(playerUuid);
         originalGameModes.put(playerUuid, player.interactionManager.getGameMode());
         
-        Vec3d originalPos = player.getPos();
+        Vec3d originalPos = new Vec3d(player.getX(), player.getY(), player.getZ());
         originalPositionsBeforeAuth.put(playerUuid, originalPos);
         
         Vec3d safePos = calculateSafeSpawnPosition(serverInstance, playerName);
         initialPositions.put(playerUuid, safePos);
         
-        boolean wasOp = serverInstance.getPlayerManager().isOperator(player.getGameProfile());
+        PlayerConfigEntry playerEntry = new PlayerConfigEntry(player.getGameProfile());
+        boolean wasOp = serverInstance.getPlayerManager().isOperator(playerEntry);
         originalOpStatus.put(playerUuid, wasOp);
         if (wasOp) {
-            serverInstance.getPlayerManager().removeFromOperators(player.getGameProfile());
+            serverInstance.getPlayerManager().removeFromOperators(playerEntry);
             LOGGER.info("Temporarily de-opped player {} ({}) due to password reset while online.", playerName, playerUuid);
         }
         
@@ -228,7 +236,8 @@ public class PlayerStateManager {
     private Vec3d calculateSafeSpawnPosition(MinecraftServer server, String playerName) {
         ServerWorld overworld = server.getWorld(World.OVERWORLD);
         if (overworld != null) {
-            BlockPos spawnPos = overworld.getSpawnPos();
+            WorldProperties.SpawnPoint spawnPoint = overworld.getSpawnPoint();
+            BlockPos spawnPos = spawnPoint.getPos();
             int safeY = overworld.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, spawnPos.getX(), spawnPos.getZ());
             return new Vec3d(
                 spawnPos.getX() + SafeserverConstants.SAFE_SPAWN_CENTER_OFFSET, 
@@ -252,14 +261,15 @@ public class PlayerStateManager {
         if (serverInstance != null) {
             ServerWorld overworld = serverInstance.getWorld(World.OVERWORLD);
             if (overworld != null) {
-                BlockPos spawnPos = overworld.getSpawnPos();
+                WorldProperties.SpawnPoint spawnPoint = overworld.getSpawnPoint();
+                BlockPos spawnPos = spawnPoint.getPos();
                 int spawnY = overworld.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, spawnPos.getX(), spawnPos.getZ());
                 player.networkHandler.requestTeleport(
                     spawnPos.getX() + SafeserverConstants.SAFE_SPAWN_CENTER_OFFSET, 
                     spawnY, 
                     spawnPos.getZ() + SafeserverConstants.SAFE_SPAWN_CENTER_OFFSET, 
-                    overworld.getSpawnAngle(), 
-                    0.0f
+                    spawnPoint.yaw(), 
+                    spawnPoint.pitch()
                 );
                 return true;
             } else {

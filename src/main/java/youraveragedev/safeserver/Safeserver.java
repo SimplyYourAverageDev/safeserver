@@ -9,6 +9,7 @@ import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.server.PlayerConfigEntry;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
@@ -102,9 +103,6 @@ public class Safeserver implements ModInitializer {
 
 			LOGGER.info("Player {} ({}) joined. Checking authentication...", playerName, playerUuidString);
 
-			// Store original OP status and de-op if necessary
-			boolean wasOp = server.getPlayerManager().isOperator(player.getGameProfile());
-
 			if (playerPasswords.containsKey(playerUuidString)) {
 				// Returning player needing login
 				if (!stateManager.isPlayerAuthenticating(playerUuid)) {
@@ -131,8 +129,9 @@ public class Safeserver implements ModInitializer {
 			stateManager.handlePlayerDisconnect(player, server);
 			
 			// General safety de-op: De-op player on disconnect if they are currently OP
-			if (server.getPlayerManager().isOperator(player.getGameProfile())) {
-				server.getPlayerManager().removeFromOperators(player.getGameProfile());
+			PlayerConfigEntry playerEntry = new PlayerConfigEntry(player.getGameProfile());
+			if (server.getPlayerManager().isOperator(playerEntry)) {
+				server.getPlayerManager().removeFromOperators(playerEntry);
 				LOGGER.info("De-opped player {} ({}) on disconnect for security.", playerName, playerUuid);
 			}
 		});
