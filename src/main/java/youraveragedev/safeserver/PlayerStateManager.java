@@ -1,18 +1,19 @@
 package youraveragedev.safeserver;
 
-import net.minecraft.entity.effect.StatusEffectInstance;
-import net.minecraft.entity.effect.StatusEffects;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.PlayerConfigEntry;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.Text;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-import net.minecraft.world.Heightmap;
-import net.minecraft.world.World;
-import net.minecraft.world.WorldProperties;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.players.NameAndId;
+import net.minecraft.server.players.ServerOpListEntry;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.storage.LevelData;
+import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,289 +23,288 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class PlayerStateManager {
     private static final Logger LOGGER = LoggerFactory.getLogger("safeserver-state-manager");
-    
+
     private final Set<UUID> authenticatingPlayers = ConcurrentHashMap.newKeySet();
-    private final ConcurrentHashMap<UUID, GameMode> originalGameModes = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<UUID, Vec3d> initialPositions = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<UUID, Vec3d> originalPositionsBeforeAuth = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<UUID, Boolean> originalOpStatus = new ConcurrentHashMap<>();
-    
+    private final ConcurrentHashMap<UUID, GameType> originalGameModes = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Vec3> initialPositions = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Vec3> originalPositionsBeforeAuth = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, ServerOpListEntry> originalOpEntries = new ConcurrentHashMap<>();
+
     private MinecraftServer serverInstance;
-    
+
     public void setServerInstance(MinecraftServer server) {
         this.serverInstance = server;
     }
-    
+
     public boolean isPlayerAuthenticating(UUID playerUuid) {
         return authenticatingPlayers.contains(playerUuid);
     }
-    
-    public void applyAuthenticationState(ServerPlayerEntity player, MinecraftServer server) {
-        UUID playerUuid = player.getUuid();
+
+    public void applyAuthenticationState(ServerPlayer player, MinecraftServer server) {
+        UUID playerUuid = player.getUUID();
         String playerName = player.getName().getString();
-        
+
         authenticatingPlayers.add(playerUuid);
-        originalGameModes.put(playerUuid, player.interactionManager.getGameMode());
-        
-        Vec3d originalPos = new Vec3d(player.getX(), player.getY(), player.getZ());
+        originalGameModes.put(playerUuid, player.gameMode.getGameModeForPlayer());
+
+        Vec3 originalPos = new Vec3(player.getX(), player.getY(), player.getZ());
         originalPositionsBeforeAuth.put(playerUuid, originalPos);
-        
-        Vec3d safePos = calculateSafeSpawnPosition(server, playerName);
+
+        Vec3 safePos = calculateSafeSpawnPosition(server, playerName);
         initialPositions.put(playerUuid, safePos);
-        
-        PlayerConfigEntry playerEntry = new PlayerConfigEntry(player.getGameProfile());
-        boolean wasOp = server.getPlayerManager().isOperator(playerEntry);
-        originalOpStatus.put(playerUuid, wasOp);
-        if (wasOp) {
-            server.getPlayerManager().removeFromOperators(playerEntry);
+
+        NameAndId playerIdentity = new NameAndId(player.getGameProfile());
+        ServerOpListEntry originalOpEntry = server.getPlayerList().getOps().get(playerIdentity);
+        originalOpEntries.put(playerUuid, originalOpEntry);
+
+        if (originalOpEntry != null) {
+            server.getPlayerList().deop(playerIdentity);
             LOGGER.info("Temporarily de-opped player {} ({}) for authentication.", playerName, playerUuid);
         }
-        
-        player.changeGameMode(GameMode.SPECTATOR);
-        player.networkHandler.requestTeleport(safePos.getX(), safePos.getY(), safePos.getZ(), 0, 0);
-        player.addStatusEffect(new StatusEffectInstance(StatusEffects.BLINDNESS, Integer.MAX_VALUE, 0, false, false, true));
-        
+
+        player.setGameMode(GameType.SPECTATOR);
+        player.connection.teleport(safePos.x, safePos.y, safePos.z, 0, 0);
+        player.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, Integer.MAX_VALUE, 0, false, false, true));
+
         LOGGER.info("Applied spectator mode and blindness to {} for authentication.", playerName);
     }
-    
-    public void sendWelcomeMessages(ServerPlayerEntity player, boolean hasPassword) {
+
+    public void sendWelcomeMessages(ServerPlayer player, boolean hasPassword) {
         if (hasPassword) {
-            player.sendMessage(Text.literal(SafeserverConstants.WELCOME_BACK_MESSAGE), false);
+            player.sendSystemMessage(Component.literal(SafeserverConstants.WELCOME_BACK_MESSAGE));
         } else {
-            player.sendMessage(Text.literal(SafeserverConstants.WELCOME_NEW_MESSAGE), false);
-            player.sendMessage(Text.literal(SafeserverConstants.SET_PASSWORD_PROMPT), false);
+            player.sendSystemMessage(Component.literal(SafeserverConstants.WELCOME_NEW_MESSAGE));
+            player.sendSystemMessage(Component.literal(SafeserverConstants.SET_PASSWORD_PROMPT));
         }
     }
-    
+
     public boolean restorePlayerState(UUID playerUuid) {
-        GameMode originalMode = originalGameModes.remove(playerUuid);
+        GameType originalMode = originalGameModes.remove(playerUuid);
         initialPositions.remove(playerUuid);
-        Vec3d originalPos = originalPositionsBeforeAuth.remove(playerUuid);
-        Boolean wasOp = originalOpStatus.remove(playerUuid);
-        
-        ServerPlayerEntity player = (serverInstance != null) ? serverInstance.getPlayerManager().getPlayer(playerUuid) : null;
+        Vec3 originalPos = originalPositionsBeforeAuth.remove(playerUuid);
+        ServerOpListEntry originalOpEntry = originalOpEntries.remove(playerUuid);
+
+        ServerPlayer player = serverInstance != null ? serverInstance.getPlayerList().getPlayer(playerUuid) : null;
         boolean success = true;
-        
+
         if (player != null) {
             String playerName = player.getName().getString();
-            
+
             if (originalPos != null) {
-                player.networkHandler.requestTeleport(originalPos.getX(), originalPos.getY(), originalPos.getZ(), player.getYaw(), player.getPitch());
+                player.connection.teleport(originalPos.x, originalPos.y, originalPos.z, player.getYRot(), player.getXRot());
                 LOGGER.info("Teleported player {} back to original location after authentication.", playerName);
             } else {
                 success = restoreToSpawn(player) && success;
             }
-            
-            GameMode modeToRestore = determineGameModeToRestore(originalMode, playerName);
+
+            GameType modeToRestore = determineGameModeToRestore(originalMode, playerName);
             if (modeToRestore != null) {
-                player.changeGameMode(modeToRestore);
+                player.setGameMode(modeToRestore);
             } else {
                 success = false;
             }
-            
-            if (player.hasStatusEffect(StatusEffects.BLINDNESS)) {
-                player.removeStatusEffect(StatusEffects.BLINDNESS);
+
+            if (player.hasEffect(MobEffects.BLINDNESS)) {
+                player.removeEffect(MobEffects.BLINDNESS);
                 LOGGER.info("Removed blindness from player {} after authentication.", playerName);
             }
-            
-            if (wasOp != null && wasOp && serverInstance != null) {
-                PlayerConfigEntry playerEntry = new PlayerConfigEntry(player.getGameProfile());
-                if (!serverInstance.getPlayerManager().isOperator(playerEntry)) {
-                    serverInstance.getPlayerManager().addToOperators(playerEntry);
+
+            if (originalOpEntry != null && serverInstance != null) {
+                NameAndId playerIdentity = new NameAndId(player.getGameProfile());
+                if (!serverInstance.getPlayerList().isOp(playerIdentity)) {
+                    serverInstance.getPlayerList().getOps().add(originalOpEntry);
                 }
                 LOGGER.info("Restored OP status for player {}.", playerName);
-            } else if (wasOp == null) {
-                LOGGER.warn("Original OP status for player {} (UUID {}) was unexpectedly missing during state restoration.", playerName, playerUuid);
             }
         } else {
-            LOGGER.warn("Could not restore state for UUID {} (Player not found online).", playerUuid);
+            LOGGER.warn("Could not restore state for UUID {} (player not found online).", playerUuid);
             cleanupPlayerState(playerUuid);
             success = false;
         }
-        
+
         authenticatingPlayers.remove(playerUuid);
         return success;
     }
-    
+
     public void cleanupPlayerState(UUID playerUuid) {
         authenticatingPlayers.remove(playerUuid);
         originalGameModes.remove(playerUuid);
         initialPositions.remove(playerUuid);
         originalPositionsBeforeAuth.remove(playerUuid);
-        originalOpStatus.remove(playerUuid);
+        originalOpEntries.remove(playerUuid);
     }
-    
-    public void handlePlayerDisconnect(ServerPlayerEntity player, MinecraftServer server) {
-        UUID playerUuid = player.getUuid();
+
+    public void handlePlayerDisconnect(ServerPlayer player, MinecraftServer server) {
+        UUID playerUuid = player.getUUID();
         String playerName = player.getName().getString();
-        
+
         if (!authenticatingPlayers.contains(playerUuid)) {
-            originalOpStatus.remove(playerUuid);
+            originalOpEntries.remove(playerUuid);
             return;
         }
-        
+
         LOGGER.info("Player {} ({}) disconnecting during authentication. Attempting state restoration before save...", playerName, playerUuid);
-        
-        GameMode originalMode = originalGameModes.get(playerUuid);
-        Vec3d originalPos = originalPositionsBeforeAuth.get(playerUuid);
-        Boolean wasOp = originalOpStatus.get(playerUuid);
-        
+
+        GameType originalMode = originalGameModes.get(playerUuid);
+        Vec3 originalPos = originalPositionsBeforeAuth.get(playerUuid);
+        ServerOpListEntry originalOpEntry = originalOpEntries.get(playerUuid);
+
         boolean restoredSomething = false;
+
         try {
             if (originalPos != null) {
-                player.networkHandler.requestTeleport(originalPos.getX(), originalPos.getY(), originalPos.getZ(), player.getYaw(), player.getPitch());
+                player.connection.teleport(originalPos.x, originalPos.y, originalPos.z, player.getYRot(), player.getXRot());
                 LOGGER.info("Requested teleport for {} back to {} before disconnect save.", playerName, originalPos);
                 restoredSomething = true;
             }
-            
-            GameMode modeToRestore = determineGameModeToRestore(originalMode, playerName);
-            if (modeToRestore != null && player.interactionManager.getGameMode() != modeToRestore) {
-                player.changeGameMode(modeToRestore);
+
+            GameType modeToRestore = determineGameModeToRestore(originalMode, playerName);
+            if (modeToRestore != null && player.gameMode.getGameModeForPlayer() != modeToRestore) {
+                player.setGameMode(modeToRestore);
                 LOGGER.info("Restored gamemode for {} to {} before disconnect save.", playerName, modeToRestore);
                 restoredSomething = true;
             }
-            
-            if (player.hasStatusEffect(StatusEffects.BLINDNESS)) {
-                player.removeStatusEffect(StatusEffects.BLINDNESS);
+
+            if (player.hasEffect(MobEffects.BLINDNESS)) {
+                player.removeEffect(MobEffects.BLINDNESS);
                 LOGGER.info("Removed blindness from {} before disconnect save.", playerName);
                 restoredSomething = true;
             }
-            
-            PlayerConfigEntry playerEntry = new PlayerConfigEntry(player.getGameProfile());
-            if (wasOp != null && wasOp && !server.getPlayerManager().isOperator(playerEntry)) {
-                server.getPlayerManager().addToOperators(playerEntry);
+
+            NameAndId playerIdentity = new NameAndId(player.getGameProfile());
+            if (originalOpEntry != null && !server.getPlayerList().isOp(playerIdentity)) {
+                server.getPlayerList().getOps().add(originalOpEntry);
                 LOGGER.info("Restored OP status for {} before disconnect save.", playerName);
                 restoredSomething = true;
             }
         } catch (Exception e) {
             LOGGER.error("Error attempting immediate state restoration for {} during disconnect: {}", playerName, e.getMessage(), e);
         }
-        
+
         cleanupPlayerState(playerUuid);
+
         if (restoredSomething) {
             LOGGER.info("Cleaned up authentication state for {} after attempting pre-disconnect restoration.", playerName);
         } else {
             LOGGER.warn("Cleaned up authentication state for {} (pre-disconnect restoration may not have completed fully).", playerName);
         }
     }
-    
+
     public void enforcePositionFreeze() {
         for (UUID playerUuid : Set.copyOf(authenticatingPlayers)) {
-            ServerPlayerEntity player = (serverInstance != null) ? serverInstance.getPlayerManager().getPlayer(playerUuid) : null;
-            Vec3d initialPos = initialPositions.get(playerUuid);
-            
+            ServerPlayer player = serverInstance != null ? serverInstance.getPlayerList().getPlayer(playerUuid) : null;
+            Vec3 initialPos = initialPositions.get(playerUuid);
+
             if (player != null && initialPos != null) {
-                if (player.getX() != initialPos.getX() || player.getY() != initialPos.getY() || player.getZ() != initialPos.getZ()) {
-                    player.networkHandler.requestTeleport(initialPos.getX(), initialPos.getY(), initialPos.getZ(), player.getYaw(), player.getPitch());
+                if (player.getX() != initialPos.x || player.getY() != initialPos.y || player.getZ() != initialPos.z) {
+                    player.connection.teleport(initialPos.x, initialPos.y, initialPos.z, player.getYRot(), player.getXRot());
                 }
-            } else if (player == null || initialPos == null) {
+            } else {
                 LOGGER.warn("Cleaning up inconsistent authentication state for UUID: {}", playerUuid);
                 cleanupPlayerState(playerUuid);
             }
         }
     }
-    
-    public void forcePlayerIntoAuthenticationState(ServerPlayerEntity player) {
-        UUID playerUuid = player.getUuid();
+
+    public void forcePlayerIntoAuthenticationState(ServerPlayer player) {
+        UUID playerUuid = player.getUUID();
         String playerName = player.getName().getString();
-        
+
         LOGGER.info("Forcing player {} ({}) into authentication state after password reset.", playerName, playerUuid);
-        
+
         authenticatingPlayers.add(playerUuid);
-        originalGameModes.put(playerUuid, player.interactionManager.getGameMode());
-        
-        Vec3d originalPos = new Vec3d(player.getX(), player.getY(), player.getZ());
+        originalGameModes.put(playerUuid, player.gameMode.getGameModeForPlayer());
+
+        Vec3 originalPos = new Vec3(player.getX(), player.getY(), player.getZ());
         originalPositionsBeforeAuth.put(playerUuid, originalPos);
-        
-        Vec3d safePos = calculateSafeSpawnPosition(serverInstance, playerName);
+
+        Vec3 safePos = calculateSafeSpawnPosition(serverInstance, playerName);
         initialPositions.put(playerUuid, safePos);
-        
-        PlayerConfigEntry playerEntry = new PlayerConfigEntry(player.getGameProfile());
-        boolean wasOp = serverInstance.getPlayerManager().isOperator(playerEntry);
-        originalOpStatus.put(playerUuid, wasOp);
-        if (wasOp) {
-            serverInstance.getPlayerManager().removeFromOperators(playerEntry);
+
+        NameAndId playerIdentity = new NameAndId(player.getGameProfile());
+        ServerOpListEntry originalOpEntry = serverInstance.getPlayerList().getOps().get(playerIdentity);
+        originalOpEntries.put(playerUuid, originalOpEntry);
+
+        if (originalOpEntry != null) {
+            serverInstance.getPlayerList().deop(playerIdentity);
             LOGGER.info("Temporarily de-opped player {} ({}) due to password reset while online.", playerName, playerUuid);
         }
-        
-        player.changeGameMode(GameMode.SPECTATOR);
-        player.networkHandler.requestTeleport(safePos.getX(), safePos.getY(), safePos.getZ(), 0, 0);
-        player.sendMessage(Text.literal(SafeserverConstants.RESET_PASSWORD_MESSAGE), false);
-        player.sendMessage(Text.literal(SafeserverConstants.RESET_PASSWORD_PROMPT), false);
+
+        player.setGameMode(GameType.SPECTATOR);
+        player.connection.teleport(safePos.x, safePos.y, safePos.z, 0, 0);
+        player.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, Integer.MAX_VALUE, 0, false, false, true));
+        player.sendSystemMessage(Component.literal(SafeserverConstants.RESET_PASSWORD_MESSAGE));
+        player.sendSystemMessage(Component.literal(SafeserverConstants.RESET_PASSWORD_PROMPT));
     }
-    
-    private Vec3d calculateSafeSpawnPosition(MinecraftServer server, String playerName) {
-        ServerWorld overworld = server.getWorld(World.OVERWORLD);
-        if (overworld != null) {
-            WorldProperties.SpawnPoint spawnPoint = overworld.getSpawnPoint();
-            BlockPos spawnPos = spawnPoint.getPos();
-            int safeY = overworld.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, spawnPos.getX(), spawnPos.getZ());
-            return new Vec3d(
-                spawnPos.getX() + SafeserverConstants.SAFE_SPAWN_CENTER_OFFSET, 
-                safeY + SafeserverConstants.SAFE_SPAWN_Y_OFFSET, 
-                spawnPos.getZ() + SafeserverConstants.SAFE_SPAWN_CENTER_OFFSET
-            );
-        } else {
-            LOGGER.warn("Could not get Overworld to determine spawn point for player {}. Defaulting to fallback.", playerName);
-            return new Vec3d(
-                SafeserverConstants.SAFE_SPAWN_CENTER_OFFSET, 
-                SafeserverConstants.FALLBACK_Y_COORDINATE, 
+
+    private Vec3 calculateSafeSpawnPosition(MinecraftServer server, String playerName) {
+        LevelData.RespawnData respawnData = server.getRespawnData();
+        ServerLevel respawnLevel = server.getLevel(respawnData.dimension());
+        ServerLevel fallbackOverworld = server.getLevel(Level.OVERWORLD);
+        ServerLevel level = respawnLevel != null ? respawnLevel : fallbackOverworld;
+
+        if (level == null) {
+            LOGGER.warn("Could not resolve a spawn level for player {}. Defaulting to fallback.", playerName);
+            return new Vec3(
+                SafeserverConstants.SAFE_SPAWN_CENTER_OFFSET,
+                SafeserverConstants.FALLBACK_Y_COORDINATE,
                 SafeserverConstants.SAFE_SPAWN_CENTER_OFFSET
             );
         }
+
+        BlockPos spawnPos = respawnData.pos();
+        int safeY = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, spawnPos.getX(), spawnPos.getZ());
+        return new Vec3(
+            spawnPos.getX() + SafeserverConstants.SAFE_SPAWN_CENTER_OFFSET,
+            safeY + SafeserverConstants.SAFE_SPAWN_Y_OFFSET,
+            spawnPos.getZ() + SafeserverConstants.SAFE_SPAWN_CENTER_OFFSET
+        );
     }
-    
-    private boolean restoreToSpawn(ServerPlayerEntity player) {
+
+    private boolean restoreToSpawn(ServerPlayer player) {
         String playerName = player.getName().getString();
         LOGGER.warn("Could not find original position for player {} during state restoration. Restoring to spawn.", playerName);
-        
-        if (serverInstance != null) {
-            ServerWorld overworld = serverInstance.getWorld(World.OVERWORLD);
-            if (overworld != null) {
-                WorldProperties.SpawnPoint spawnPoint = overworld.getSpawnPoint();
-                BlockPos spawnPos = spawnPoint.getPos();
-                int spawnY = overworld.getTopY(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES, spawnPos.getX(), spawnPos.getZ());
-                player.networkHandler.requestTeleport(
-                    spawnPos.getX() + SafeserverConstants.SAFE_SPAWN_CENTER_OFFSET, 
-                    spawnY, 
-                    spawnPos.getZ() + SafeserverConstants.SAFE_SPAWN_CENTER_OFFSET, 
-                    spawnPoint.yaw(), 
-                    spawnPoint.pitch()
-                );
-                return true;
-            } else {
-                LOGGER.error("Could not get Overworld to restore player {} to spawn!", playerName);
-                return false;
-            }
-        } else {
+
+        if (serverInstance == null) {
             LOGGER.error("Could not get server instance to restore player {} to spawn!", playerName);
             return false;
         }
-    }
-    
-    private GameMode determineGameModeToRestore(GameMode originalMode, String playerName) {
-        if (originalMode != null) {
-            if (originalMode == GameMode.SPECTATOR) {
-                if (serverInstance != null) {
-                    GameMode defaultMode = serverInstance.getDefaultGameMode();
-                    LOGGER.info("Original gamemode was SPECTATOR, restoring to server default ({}) for player {}.", defaultMode, playerName);
-                    return defaultMode;
-                } else {
-                    LOGGER.error("Could not get server instance to determine default gamemode for player {}. Restoration may fail.", playerName);
-                    return null;
-                }
-            } else {
-                LOGGER.info("Restored original gamemode ({}) for player {}.", originalMode, playerName);
-                return originalMode;
-            }
-        } else {
-            LOGGER.warn("Could not find original gamemode for player {}. Setting to default.", playerName);
-            if (serverInstance != null) {
-                return serverInstance.getDefaultGameMode();
-            } else {
-                LOGGER.error("Could not get server instance to determine default gamemode for player {}. Restoration may fail.", playerName);
-                return null;
-            }
+
+        LevelData.RespawnData respawnData = serverInstance.getRespawnData();
+        ServerLevel respawnLevel = serverInstance.getLevel(respawnData.dimension());
+
+        if (respawnLevel == null) {
+            LOGGER.error("Could not resolve a respawn level to restore player {} to spawn!", playerName);
+            return false;
         }
+
+        BlockPos spawnPos = respawnData.pos();
+        int spawnY = respawnLevel.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, spawnPos.getX(), spawnPos.getZ());
+        player.teleportTo(
+            respawnLevel,
+            spawnPos.getX() + SafeserverConstants.SAFE_SPAWN_CENTER_OFFSET,
+            spawnY,
+            spawnPos.getZ() + SafeserverConstants.SAFE_SPAWN_CENTER_OFFSET,
+            Set.of(),
+            respawnData.yaw(),
+            respawnData.pitch(),
+            false
+        );
+        return true;
+    }
+
+    private GameType determineGameModeToRestore(GameType originalMode, String playerName) {
+        if (originalMode != null) {
+            LOGGER.info("Restored original gamemode ({}) for player {}.", originalMode, playerName);
+            return originalMode;
+        }
+
+        LOGGER.warn("Could not find original gamemode for player {}. Setting to default.", playerName);
+        if (serverInstance != null) {
+            return serverInstance.getDefaultGameType();
+        }
+
+        LOGGER.error("Could not get server instance to determine default gamemode for player {}. Restoration may fail.", playerName);
+        return null;
     }
 }

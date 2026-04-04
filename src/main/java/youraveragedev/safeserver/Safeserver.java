@@ -7,17 +7,8 @@ import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
-import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
-import net.minecraft.server.PlayerConfigEntry;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.text.Text;
-import net.minecraft.util.ActionResult;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.GameMode;
-import net.minecraft.world.Heightmap;
-import net.minecraft.world.World;
-import net.minecraft.server.world.ServerWorld;
+import net.minecraft.network.chat.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,11 +35,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.entity.effect.StatusEffectInstance;
-import net.minecraft.entity.effect.StatusEffects;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResult;
 
 public class Safeserver implements ModInitializer {
 	public static final String MOD_ID = "safeserver";
+	private static Safeserver instance;
 
 	// This logger is used to write text to the console and the log file.
 	// It is considered best practice to use your mod id as the logger's name.
@@ -79,6 +71,8 @@ public class Safeserver implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
+		instance = this;
+
 		// This code runs as soon as Minecraft is in a mod-load-ready state.
 		// However, some things (like resources) may still be uninitialized.
 		// Proceed with mild caution.
@@ -96,8 +90,8 @@ public class Safeserver implements ModInitializer {
 
 		// Player Join Logic
 		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
-			ServerPlayerEntity player = handler.player;
-			UUID playerUuid = player.getUuid();
+			ServerPlayer player = handler.player;
+			UUID playerUuid = player.getUUID();
 			String playerUuidString = playerUuid.toString();
 			String playerName = player.getName().getString();
 
@@ -122,18 +116,11 @@ public class Safeserver implements ModInitializer {
 
 		// Player Disconnect Logic
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
-			ServerPlayerEntity player = handler.player;
-			UUID playerUuid = player.getUuid();
+			ServerPlayer player = handler.player;
+			UUID playerUuid = player.getUUID();
 			String playerName = player.getName().getString();
 			
 			stateManager.handlePlayerDisconnect(player, server);
-			
-			// General safety de-op: De-op player on disconnect if they are currently OP
-			PlayerConfigEntry playerEntry = new PlayerConfigEntry(player.getGameProfile());
-			if (server.getPlayerManager().isOperator(playerEntry)) {
-				server.getPlayerManager().removeFromOperators(playerEntry);
-				LOGGER.info("De-opped player {} ({}) on disconnect for security.", playerName, playerUuid);
-			}
 		});
 
 		// Register Commands
@@ -160,70 +147,72 @@ public class Safeserver implements ModInitializer {
 	}
 
 	private void registerGameplayBlockingEvents() {
-		// Block commands other than /login and /setpassword
-		ServerMessageEvents.COMMAND_MESSAGE.register((message, source, params) -> {
-			ServerPlayerEntity player = source.getPlayer();
-			if (player != null && stateManager.isPlayerAuthenticating(player.getUuid())) {
-				String fullCommand = message.getContent().getString().trim();
-				String commandRoot = fullCommand.split(" ", 2)[0];
-				if (commandRoot.startsWith("/")) {
-					commandRoot = commandRoot.substring(1);
-				}
-
-				if (!commandRoot.equalsIgnoreCase("login") && !commandRoot.equalsIgnoreCase("setpassword")) {
-					player.sendMessage(Text.literal(SafeserverConstants.AUTH_COMMAND_MESSAGE), false);
-					Safeserver.LOGGER.debug("Blocked command attempt \"{}\" for unauthenticated player {}", fullCommand, player.getName().getString());
-				}
-			}
-		});
-
 		// Block Block Breaking
 		AttackBlockCallback.EVENT.register((player, world, hand, pos, direction) -> {
-			if (stateManager.isPlayerAuthenticating(player.getUuid())) {
-				player.sendMessage(Text.literal(SafeserverConstants.AUTH_INTERACT_MESSAGE), true); // Send to action bar
-				return ActionResult.FAIL;
+			if (stateManager.isPlayerAuthenticating(player.getUUID())) {
+				player.sendOverlayMessage(Component.literal(SafeserverConstants.AUTH_INTERACT_MESSAGE));
+				return InteractionResult.FAIL;
 			}
-			return ActionResult.PASS;
+			return InteractionResult.PASS;
 		});
 
 		// Block Block Usage
 		UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
-			if (stateManager.isPlayerAuthenticating(player.getUuid())) {
-				player.sendMessage(Text.literal(SafeserverConstants.AUTH_INTERACT_MESSAGE), true);
-				return ActionResult.FAIL;
+			if (stateManager.isPlayerAuthenticating(player.getUUID())) {
+				player.sendOverlayMessage(Component.literal(SafeserverConstants.AUTH_INTERACT_MESSAGE));
+				return InteractionResult.FAIL;
 			}
-			return ActionResult.PASS;
+			return InteractionResult.PASS;
 		});
 
 		// Block Item Usage
 		UseItemCallback.EVENT.register((player, world, hand) -> {
-			if (stateManager.isPlayerAuthenticating(player.getUuid())) {
-				return ActionResult.FAIL;
+			if (stateManager.isPlayerAuthenticating(player.getUUID())) {
+				return InteractionResult.FAIL;
 			}
-			return ActionResult.PASS;
+			return InteractionResult.PASS;
 		});
 
 		// Block Attacking Entities
 		AttackEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
-            if (stateManager.isPlayerAuthenticating(player.getUuid())) {
-                player.sendMessage(Text.literal(SafeserverConstants.AUTH_INTERACT_MESSAGE), true);
-                return ActionResult.FAIL;
+            if (stateManager.isPlayerAuthenticating(player.getUUID())) {
+                player.sendOverlayMessage(Component.literal(SafeserverConstants.AUTH_INTERACT_MESSAGE));
+                return InteractionResult.FAIL;
             }
-            return ActionResult.PASS;
+            return InteractionResult.PASS;
         });
 
 		// Block Using Entities (e.g., trading, mounting)
         UseEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
-            if (stateManager.isPlayerAuthenticating(player.getUuid())) {
-                player.sendMessage(Text.literal(SafeserverConstants.AUTH_INTERACT_MESSAGE), true);
-                return ActionResult.FAIL;
+            if (stateManager.isPlayerAuthenticating(player.getUUID())) {
+                player.sendOverlayMessage(Component.literal(SafeserverConstants.AUTH_INTERACT_MESSAGE));
+                return InteractionResult.FAIL;
             }
-            return ActionResult.PASS;
+            return InteractionResult.PASS;
         });
 
 		// Note: Movement blocking is more complex and might require cancelling packets
         // or using server ticks to teleport players back. For now, we focus on interactions.
 		LOGGER.info("Registered gameplay blocking event listeners.");
+	}
+
+	public static Safeserver getInstance() {
+		return instance;
+	}
+
+	public boolean shouldAllowPlayerCommand(ServerPlayer player, String command) {
+		if (!stateManager.isPlayerAuthenticating(player.getUUID())) {
+			return true;
+		}
+
+		String commandRoot = command.trim().split(" ", 2)[0];
+		if (commandRoot.equalsIgnoreCase("login") || commandRoot.equalsIgnoreCase("setpassword")) {
+			return true;
+		}
+
+		player.sendSystemMessage(Component.literal(SafeserverConstants.AUTH_COMMAND_MESSAGE));
+		LOGGER.debug("Blocked command attempt \"{}\" for unauthenticated player {}", command, player.getName().getString());
+		return false;
 	}
 
 	// Helper method to hash passwords (using SHA-256)
@@ -415,7 +404,7 @@ public class Safeserver implements ModInitializer {
 		savePasswords();
 
 		// If the target player is currently online, force them back into authentication state
-		ServerPlayerEntity targetPlayer = (this.serverInstance != null) ? this.serverInstance.getPlayerManager().getPlayer(targetPlayerUuid) : null;
+		ServerPlayer targetPlayer = (this.serverInstance != null) ? this.serverInstance.getPlayerList().getPlayer(targetPlayerUuid) : null;
 		if (targetPlayer != null && !stateManager.isPlayerAuthenticating(targetPlayerUuid)) {
 			stateManager.forcePlayerIntoAuthenticationState(targetPlayer);
 		} else {
