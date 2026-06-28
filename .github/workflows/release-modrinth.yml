@@ -1,4 +1,4 @@
-name: Release to Modrinth
+name: release-modrinth
 
 on:
   push:
@@ -7,33 +7,97 @@ on:
   workflow_dispatch:
     inputs:
       changelog:
-        description: "Changelog text for the Modrinth release"
+        description: "Optional changelog text (overrides tag annotation)"
         required: false
-        default: ""
-
-permissions:
-  contents: read
+        type: string
+      version_type:
+        description: "Modrinth version type"
+        required: false
+        default: "release"
+        type: choice
+        options:
+          - release
+          - beta
+          - alpha
+      status:
+        description: "Modrinth visibility status"
+        required: false
+        default: "listed"
+        type: choice
+        options:
+          - listed
+          - unlisted
+          - draft
+          - archived
+      featured:
+        description: "Feature this version"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
-  release:
-    name: Publish Modrinth version
-    runs-on: ubuntu-latest
-
+  publish:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Set up Java
+      - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
           java-version: "25"
+          distribution: "microsoft"
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - name: Make release script executable
+        run: chmod +x scripts/publish_modrinth.sh
+
+      - name: Validate tag matches gradle.properties
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          MOD_VERSION="$(awk -F= '$1=="mod_version"{print $2}' gradle.properties | tail -n1)"
+          if [[ -z "${MOD_VERSION}" ]]; then
+            echo "Could not read mod_version from gradle.properties" >&2
+            exit 1
+          fi
+          if [[ "${TAG_VERSION}" != "${MOD_VERSION}" ]]; then
+            echo "Tag version (${TAG_VERSION}) does not match mod_version (${MOD_VERSION})." >&2
+            exit 1
+          fi
+
+      - name: Build changelog file
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] && [[ -n "${{ inputs.changelog }}" ]]; then
+            printf "%s\n" "${{ inputs.changelog }}" > .release-changelog.md
+            exit 0
+          fi
+
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG_MSG="$(git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents)')"
+            if [[ -n "${TAG_MSG}" ]]; then
+              printf "%s\n" "${TAG_MSG}" > .release-changelog.md
+              exit 0
+            fi
+          fi
+
+          printf "Automated release from GitHub Actions.\n" > .release-changelog.md
 
       - name: Publish to Modrinth
         env:
           MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
-          CHANGELOG_TEXT: ${{ inputs.changelog || format('Automated release for {0}', github.ref_name) }}
-        run: scripts/publish_modrinth.sh --changelog-text "$CHANGELOG_TEXT"
+          MODRINTH_VERSION_TYPE: ${{ inputs.version_type || 'release' }}
+          MODRINTH_STATUS: ${{ inputs.status || 'listed' }}
+          MODRINTH_FEATURED: ${{ inputs.featured || false }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${MODRINTH_TOKEN}" ]]; then
+            echo "Missing MODRINTH_TOKEN secret." >&2
+            exit 1
+          fi
+          scripts/publish_modrinth.sh --changelog-file .release-changelog.md
