@@ -50,12 +50,12 @@ Use `scripts/publish_modrinth.sh` to build and publish a new version to Modrinth
    - Publish current `mod_version` from `gradle.properties`:
      `scripts/publish_modrinth.sh --changelog-text "Bug fixes and improvements"`
    - Bump version and publish:
-     `scripts/publish_modrinth.sh --version 2.1.2 --set-version --changelog-file CHANGELOG.md`
+     `scripts/publish_modrinth.sh --version 2.1.3 --set-version --changelog-file CHANGELOG.md`
 
 Useful flags:
 - `--game-versions "26.2"` to override targeted MC versions
 - `--loaders "fabric"` to set loaders
-- `--sources-jar build/libs/safeserver-2.1.2-sources.jar` to override detected sources jar
+- `--sources-jar build/libs/safeserver-2.1.3-sources.jar` to override detected sources jar
 - `--version-type release|beta|alpha`
 - `--status listed|unlisted|draft|archived`
 - `--featured true|false`
@@ -79,6 +79,6 @@ Setup:
 Release flow:
 1. Commit your release changes (including `mod_version` bump).
 2. Create and push a tag matching the version:
-   `git tag v2.1.2`
-   `git push origin v2.1.2`
+   `git tag v2.1.3`
+   `git push origin v2.1.3`
 3. Workflow builds and publishes to Modrinth automatically.
