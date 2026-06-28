@@ -3,7 +3,9 @@
 	"package": "youraveragedev.safeserver.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
-		"CommandRestrictionMixin"
+		"CommandRestrictionMixin",
+		"PreJoinOpSafetyMixin",
+		"ServerCommonPacketListenerAccessor"
 	],
 	"injectors": {
 		"defaultRequire": 1

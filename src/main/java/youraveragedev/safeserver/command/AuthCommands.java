@@ -118,8 +118,9 @@ public class AuthCommands {
             return 1;
         }
 
+        String remoteAddress = String.valueOf(player.connection.getRemoteAddress());
         source.sendFailure(Component.literal(SafeserverConstants.INCORRECT_PASSWORD_ERROR));
-        Safeserver.LOGGER.warn("Failed login attempt for player {}.", playerName);
+        Safeserver.LOGGER.warn("Failed login attempt for player {} from {}.", playerName, remoteAddress);
         return 0;
     }
 

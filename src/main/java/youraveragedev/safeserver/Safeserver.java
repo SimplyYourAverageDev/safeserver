@@ -24,6 +24,7 @@ import java.util.concurrent.Executors;
 
 import youraveragedev.safeserver.command.AuthCommands;
 import net.fabricmc.loader.api.FabricLoader;
+import com.mojang.authlib.GameProfile;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
@@ -81,6 +82,7 @@ public class Safeserver implements ModInitializer {
 
 		// Determine password file path
 		passwordFilePath = FabricLoader.getInstance().getConfigDir().resolve(MOD_ID).resolve("passwords.json");
+		stateManager.setOpBackupFilePath(FabricLoader.getInstance().getConfigDir().resolve(MOD_ID).resolve("op-backups.json"));
 
 		// Load passwords from file
 		loadPasswords();
@@ -198,6 +200,14 @@ public class Safeserver implements ModInitializer {
 
 	public static Safeserver getInstance() {
 		return instance;
+	}
+
+	public void prepareOpSafety(GameProfile profile, MinecraftServer server) {
+		stateManager.prepareOpSafety(profile, server);
+	}
+
+	public void restorePreJoinOpSafety(GameProfile profile, MinecraftServer server) {
+		stateManager.restorePreJoinOpSafety(profile, server);
 	}
 
 	public boolean shouldAllowPlayerCommand(ServerPlayer player, String command) {
